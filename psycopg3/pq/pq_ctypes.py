@@ -9,7 +9,7 @@ implementation.
 # Copyright (C) 2020 The Psycopg Team
 
 from collections import namedtuple
-from ctypes import string_at
+from ctypes import cast, POINTER, string_at
 from ctypes import c_char_p, c_int, pointer
 
 from .enums import (
@@ -18,6 +18,7 @@ from .enums import (
     ExecStatus,
     TransactionStatus,
     Ping,
+    EventId,
 )
 from .misc import error_message
 from . import _pq_ctypes as impl
@@ -29,13 +30,15 @@ class PQerror(OperationalError):
 
 
 class PGconn:
-    __slots__ = ("pgconn_ptr",)
+    __slots__ = ("pgconn_ptr", "owned")
 
-    def __init__(self, pgconn_ptr):
+    def __init__(self, pgconn_ptr, owned=True):
         self.pgconn_ptr = pgconn_ptr
+        self.owned = owned
 
     def __del__(self):
-        self.finish()
+        if self.owned:
+            self.finish()
 
     @classmethod
     def connect(cls, conninfo):
@@ -370,15 +373,71 @@ class PGconn:
             raise MemoryError("couldn't allocate empty PGresult")
         return PGresult(rv)
 
+    def register_event_proc(self, proc, name, data=None):
+        if not getattr(proc, "is_event_proc", False):
+            raise TypeError("proc should be decorated with @PGconn.event_proc")
+
+        rv = impl.PQregisterEventProc(self.pgconn_ptr, proc, name, data)
+        if rv == 0:
+            raise PQerror("registering event proc failed")
+
+    @staticmethod
+    def event_proc(f):
+        @impl.PGEventProc
+        def event_proc_(ev_id, ev_info, data):
+            ev_id = EventId(ev_id)
+            if ev_id == EventId.PGEVT_REGISTER:
+                ev_info = cast(ev_info, POINTER(impl.PGEventRegister))
+                info_data = {
+                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False),
+                    "thing": ev_info.contents.pgconn,
+                }
+            elif ev_id == EventId.PGEVT_CONNRESET:
+                ev_info = cast(ev_info, POINTER(impl.PGEventConnReset))
+                info_data = {
+                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False)
+                }
+            elif ev_id == EventId.PGEVT_CONNDESTROY:
+                ev_info = cast(ev_info, POINTER(impl.PGEventConnDestroy))
+                info_data = {
+                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False)
+                }
+            elif ev_id == EventId.PGEVT_RESULTCREATE:
+                ev_info = cast(ev_info, POINTER(impl.PGEventResultCreate))
+                info_data = {
+                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False),
+                    "result": PGresult(ev_info.contents.result, owned=False),
+                }
+            elif ev_id == EventId.PGEVT_RESULTCOPY:
+                ev_info = cast(ev_info, POINTER(impl.PGEventResultCopy))
+                info_data = {
+                    "src": PGresult(ev_info.contents.src, owned=False),
+                    "dest": PGresult(ev_info.contents.dest, owned=False),
+                }
+            elif ev_id == EventId.PGEVT_RESULTDESTROY:
+                ev_info = cast(ev_info, POINTER(impl.PGEventResultDestroy))
+                info_data = {
+                    "result": PGresult(ev_info.contents.result, owned=False)
+                }
+            else:
+                raise AssertionError(f"unexpected event id {ev_id}")
+
+            return f(ev_id, info_data, data)
+
+        event_proc_.is_event_proc = True
+        return event_proc_
+
 
 class PGresult:
-    __slots__ = ("pgresult_ptr",)
+    __slots__ = ("pgresult_ptr", "owned")
 
-    def __init__(self, pgresult_ptr):
+    def __init__(self, pgresult_ptr, owned=True):
         self.pgresult_ptr = pgresult_ptr
+        self.owned = owned
 
     def __del__(self):
-        self.clear()
+        if self.owned:
+            self.clear()
 
     def clear(self):
         self.pgresult_ptr, p = None, self.pgresult_ptr

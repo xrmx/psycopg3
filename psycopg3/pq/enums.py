@@ -80,3 +80,12 @@ class DiagnosticField(IntEnum):
     PG_DIAG_SOURCE_FILE = ord("F")
     PG_DIAG_SOURCE_LINE = ord("L")
     PG_DIAG_SOURCE_FUNCTION = ord("R")
+
+
+class EventId(IntEnum):
+    PGEVT_REGISTER = 0
+    PGEVT_CONNRESET = auto()
+    PGEVT_CONNDESTROY = auto()
+    PGEVT_RESULTCREATE = auto()
+    PGEVT_RESULTCOPY = auto()
+    PGEVT_RESULTDESTROY = auto()

@@ -6,7 +6,7 @@ libpq access using ctypes
 
 import ctypes
 import ctypes.util
-from ctypes import Structure, POINTER
+from ctypes import Structure, CFUNCTYPE, POINTER
 from ctypes import c_char, c_char_p, c_int, c_uint, c_void_p
 
 pq = ctypes.pydll.LoadLibrary(ctypes.util.find_library("pq"))
@@ -358,3 +358,38 @@ PQfreemem.restype = None
 PQmakeEmptyPGresult = pq.PQmakeEmptyPGresult
 PQmakeEmptyPGresult.argtypes = [PGconn_ptr, c_int]
 PQmakeEmptyPGresult.restype = PGresult_ptr
+
+
+# 33.13. Event System
+
+
+class PGEventRegister(Structure):
+    _fields_ = [("pgconn", PGconn_ptr)]
+
+
+class PGEventConnReset(Structure):
+    _fields_ = [("pgconn", PGconn_ptr)]
+
+
+class PGEventConnDestroy(Structure):
+    _fields_ = [("pgconn", PGconn_ptr)]
+
+
+class PGEventResultCreate(Structure):
+    _fields_ = [("pgconn", PGconn_ptr), ("result", PGresult_ptr)]
+
+
+class PGEventResultCopy(Structure):
+    _fields_ = [("src", PGresult_ptr), ("dest", PGresult_ptr)]
+
+
+class PGEventResultDestroy(Structure):
+    _fields_ = [("result", PGresult_ptr)]
+
+
+# int eventproc(PGEventId evtId, void *evtInfo, void *passThrough)
+PGEventProc = CFUNCTYPE(c_int, c_int, c_void_p, c_void_p)
+
+PQregisterEventProc = pq.PQregisterEventProc
+PQregisterEventProc.argtypes = [PGconn_ptr, PGEventProc, c_char_p, c_void_p]
+PQregisterEventProc.restype = c_int

@@ -16,6 +16,7 @@ from .enums import (
     TransactionStatus,
     Ping,
     DiagnosticField,
+    EventId,
 )
 from .encodings import py_codecs
 from .misc import error_message
@@ -34,6 +35,7 @@ __all__ = (
     "ExecStatus",
     "Ping",
     "DiagnosticField",
+    "EventId",
     "PGconn",
     "Conninfo",
     "PQerror",

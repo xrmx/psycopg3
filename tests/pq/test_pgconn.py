@@ -216,3 +216,50 @@ def test_make_empty_result(pq, pgconn):
     res = pgconn.make_empty_result(pq.ExecStatus.PGRES_FATAL_ERROR)
     assert res.status == pq.ExecStatus.PGRES_FATAL_ERROR
     assert b"wat" in res.error_message
+
+
+def test_pgconn_callback(pq, pgconn):
+    events = []
+
+    @pq.PGconn.event_proc
+    def proc(event_id, event_info, data):
+        events.append((event_id, event_info, data))
+        return 1
+
+    pgconn.register_event_proc(proc, b"test cb")
+    assert len(events) == 1
+    ev = events[-1]
+    assert ev[0] == pq.EventId.PGEVT_REGISTER
+    assert not ev[1]["pgconn"].owned
+    assert id(ev[1]["pgconn"].pgconn_ptr.contents) == id(
+        pgconn.pgconn_ptr.contents
+    )
+    assert ev[2] is None
+
+    res = pgconn.exec_(b"select 1")
+    assert res.status == pq.ExecStatus.PGRES_TUPLES_OK
+    assert len(events) == 2
+    ev = events[-1]
+    assert ev[0] == pq.EventId.PGEVT_RESULTCREATE
+    assert not ev[1]["pgconn"].owned
+    assert ev[1]["pgconn"].pgconn_ptr == pgconn.pgconn_ptr
+    assert not ev[1]["result"].owned
+    assert ev[1]["result"].pgresult_ptr == res.pgresult_ptr
+    assert ev[2] is None
+
+    pgresult_ptr = res.pgresult_ptr
+    del res
+    assert len(events) == 3
+    ev = events[-1]
+    assert ev[0] == pq.EventId.PGEVT_RESULTDESTROY
+    assert not ev[1]["result"].owned
+    assert ev[1]["result"].pgresult_ptr == pgresult_ptr
+    assert ev[2] is None
+
+    pgconn.finish()
+    assert len(events) == 1
+    ev = events[-1]
+    assert ev[0] == pq.EventId.PGEVT_REGISTER
+    assert not ev[1]["pgconn"].owned
+    assert ev[1]["pgconn"].pgconn_ptr == pgconn.pgconn_ptr
+    assert ev[2] is None
