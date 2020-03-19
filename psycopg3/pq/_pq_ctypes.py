@@ -364,19 +364,19 @@ PQmakeEmptyPGresult.restype = PGresult_ptr
 
 
 class PGEventRegister(Structure):
-    _fields_ = [("pgconn", PGconn_ptr)]
+    _fields_ = [("conn", PGconn_ptr)]
 
 
 class PGEventConnReset(Structure):
-    _fields_ = [("pgconn", PGconn_ptr)]
+    _fields_ = [("conn", PGconn_ptr)]
 
 
 class PGEventConnDestroy(Structure):
-    _fields_ = [("pgconn", PGconn_ptr)]
+    _fields_ = [("conn", PGconn_ptr)]
 
 
 class PGEventResultCreate(Structure):
-    _fields_ = [("pgconn", PGconn_ptr), ("result", PGresult_ptr)]
+    _fields_ = [("conn", PGconn_ptr), ("result", PGresult_ptr)]
 
 
 class PGEventResultCopy(Structure):

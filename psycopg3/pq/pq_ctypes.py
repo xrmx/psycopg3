@@ -385,27 +385,29 @@ class PGconn:
     def event_proc(f):
         @impl.PGEventProc
         def event_proc_(ev_id, ev_info, data):
+            if data is not None:
+                # should incref the data python object and decref on delete
+                raise NotImplementedError("TODO: handle data in event_proc")
             ev_id = EventId(ev_id)
             if ev_id == EventId.PGEVT_REGISTER:
                 ev_info = cast(ev_info, POINTER(impl.PGEventRegister))
                 info_data = {
-                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False),
-                    "thing": ev_info.contents.pgconn,
+                    "conn": PGconn(ev_info.contents.conn, owned=False)
                 }
             elif ev_id == EventId.PGEVT_CONNRESET:
                 ev_info = cast(ev_info, POINTER(impl.PGEventConnReset))
                 info_data = {
-                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False)
+                    "conn": PGconn(ev_info.contents.conn, owned=False)
                 }
             elif ev_id == EventId.PGEVT_CONNDESTROY:
                 ev_info = cast(ev_info, POINTER(impl.PGEventConnDestroy))
                 info_data = {
-                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False)
+                    "conn": PGconn(ev_info.contents.conn, owned=False)
                 }
             elif ev_id == EventId.PGEVT_RESULTCREATE:
                 ev_info = cast(ev_info, POINTER(impl.PGEventResultCreate))
                 info_data = {
-                    "pgconn": PGconn(ev_info.contents.pgconn, owned=False),
+                    "conn": PGconn(ev_info.contents.conn, owned=False),
                     "result": PGresult(ev_info.contents.result, owned=False),
                 }
             elif ev_id == EventId.PGEVT_RESULTCOPY:
