@@ -262,3 +262,27 @@ def test_register_event_proc(pq, pgconn):
     assert ev[0] == pq.EventId.PGEVT_CONNDESTROY
     assert ev[1] == pq.ConnStatus.CONNECTION_BAD
     assert ev[3] is None
+
+
+def test_register_many_procs(pq, pgconn):
+    events1 = []
+    events2 = []
+
+    @pq.PGconn.event_proc
+    def proc1(event_id, event_info, data):
+        if event_id == pq.EventId.PGEVT_RESULTCREATE:
+            events1.append(event_info["conn"].db)
+        return 1
+
+    @pq.PGconn.event_proc
+    def proc2(event_id, event_info, data):
+        if event_id == pq.EventId.PGEVT_RESULTCREATE:
+            events2.append(event_info["conn"].status)
+        return 1
+
+    pgconn.register_event_proc(proc1, b"test cb 1")
+    pgconn.register_event_proc(proc2, b"test cb 2")
+    pgconn.exec_(b"select 1")
+
+    assert events1 == [pgconn.db]
+    assert events2 == [pgconn.status]
