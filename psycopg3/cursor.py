@@ -9,6 +9,7 @@ from typing import Any, List, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
 from . import exceptions as exc
 from .pq import error_message, DiagnosticField, ExecStatus, PGresult, Format
 from .utils.queries import query2pg, reorder_params
+from .utils.raising import raise_from_here
 from .utils.typing import Query, Params
 
 if TYPE_CHECKING:
@@ -135,6 +136,7 @@ class Cursor(BaseCursor):
     def __init__(self, conn: "Connection", binary: bool = False):
         super().__init__(conn, binary)
 
+    @raise_from_here
     def execute(self, query: Query, vars: Optional[Params] = None) -> "Cursor":
         with self.conn.lock:
             gen = self._execute_send(query, vars)
