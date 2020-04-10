@@ -12,6 +12,9 @@ from typing import Tuple
 from ..adapt import Dumper, Loader
 from .oids import builtins
 
+INT2_OID = builtins["int2"].oid
+INT4_OID = builtins["int4"].oid
+INT8_OID = builtins["int8"].oid
 FLOAT8_OID = builtins["float8"].oid
 NUMERIC_OID = builtins["numeric"].oid
 
@@ -32,10 +35,38 @@ def dump_int(obj: int) -> Tuple[bytes, int]:
     return _encode(str(obj))[0], NUMERIC_OID
 
 
+def dump_binary_int(obj: int) -> Tuple[bytes, int]:
+    if -0x8000 <= obj <= 0x7FFF:
+        return _int2_struct.pack(obj), INT2_OID
+    if -0x80000000 <= obj <= 0x7FFFFFFF:
+        return _int4_struct.pack(obj), INT4_OID
+
+    # TODO: must return numeric if it doesn't fit in 64 bits either
+    return _int8_struct.pack(obj), INT8_OID
+
+
+# These functions are not registered automatically: to use on demand
+def dump_binary_int2(obj: int) -> Tuple[bytes, int]:
+    return _int2_struct.pack(obj), INT2_OID
+
+
+def dump_binary_int4(obj: int) -> Tuple[bytes, int]:
+    return _int4_struct.pack(obj), INT4_OID
+
+
+def dump_binary_int8(obj: int) -> Tuple[bytes, int]:
+    return _int8_struct.pack(obj), INT8_OID
+
+
 @Dumper.text(float)
 def dump_float(obj: float) -> Tuple[bytes, int]:
     # Float can't be bigger than this instead
     return _encode(str(obj))[0], FLOAT8_OID
+
+
+@Dumper.binary(float)
+def dump_binary_float(obj: float) -> Tuple[bytes, int]:
+    return _float8_struct.pack(obj), FLOAT8_OID
 
 
 @Dumper.text(Decimal)

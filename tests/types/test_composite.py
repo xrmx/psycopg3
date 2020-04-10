@@ -1,3 +1,4 @@
+import re
 import pytest
 
 from psycopg3.adapt import Format, Loader
@@ -60,34 +61,59 @@ def test_load_all_chars(conn, fmt_out):
     assert res == (s,)
 
 
-@pytest.mark.parametrize(
-    "rec, want",
-    [
-        ("", ()),
-        ("null", (None,)),  # Unlike text format, this is a thing
-        ("null,null", (None, None)),
-        ("null, ''", (None, b"")),
-        (
-            "42,'foo','ba,r','ba''z','qu\"x'",
-            (42, b"foo", b"ba,r", b"ba'z", b'qu"x'),
-        ),
-        (
-            "'foo''', '''foo', '\"bar', 'bar\"' ",
-            (b"foo'", b"'foo", b'"bar', b'bar"'),
-        ),
-        (
-            "10::int, null::text, 20::float,"
-            " null::text, 'foo'::text, 'bar'::bytea ",
-            (10, None, 20.0, None, "foo", b"bar"),
-        ),
-    ],
-)
+tests_binary = [
+    ("", ()),
+    ("null", (None,)),  # Unlike text format, this is a thing
+    ("null,null", (None, None)),
+    ("null::text, ''::bytea", (None, b"")),
+    (
+        "42::int8,'foo'::text,'ba,r'::text,'ba''z'::text,'qu\"x'::text",
+        (42, "foo", "ba,r", "ba'z", 'qu"x'),
+    ),
+    (
+        "'foo'''::text, '''foo'::text, '\"bar'::text, 'bar\"'::text",
+        ("foo'", "'foo", '"bar', 'bar"'),
+    ),
+    (
+        "10::int8, null::text, 20::float8,"
+        " null::text, 'foo'::text, 'bar'::bytea",
+        (10, None, 20.0, None, "foo", b"bar"),
+    ),
+]
+
+
+@pytest.mark.parametrize("rec, want", tests_binary)
 def test_load_record_binary(conn, want, rec):
     cur = conn.cursor(binary=True)
     res = cur.execute(f"select row({rec})").fetchone()[0]
     assert res == want
     for o1, o2 in zip(res, want):
         assert type(o1) is type(o2)
+
+
+@pytest.mark.xfail
+@pytest.mark.parametrize("rec, obj", tests_binary)
+def test_dump_tuple_binary(conn, rec, obj):
+    cur = conn.cursor(binary=True)
+    if "::" in rec:
+        types = re.findall(r"::([a-z0-9]+)", rec)
+        assert len(types) == len(obj)
+    else:
+        types = ["text"] * len(obj)
+
+    fields = [f"f{i} {t}" for i, t in enumerate(types)]
+    cur.execute("drop type if exists tmptype")
+    cur.execute(f"create type tmptype as ({', '.join(fields)})")
+
+    info = composite.fetch_info(conn, "tmptype")
+    assert len(info.fields) == len(types)
+    for f, t in zip(info.fields, types):
+        assert f.type_oid == builtins[t].oid
+
+    composite.register(info, context=conn, cls=tuple)
+
+    res = cur.execute("select %b::tmptype", [obj]).fetchone()[0]
+    assert res == obj
 
 
 @pytest.fixture(scope="session")

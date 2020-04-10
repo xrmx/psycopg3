@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 
 TEXT_OID = builtins["text"].oid
+RECORD_OID = builtins["record"].oid
 
 
 class FieldInfo:
@@ -61,8 +62,30 @@ async def fetch_info_async(
 def register(
     info: CompositeTypeInfo,
     context: AdaptContext = None,
+    cls: Optional[type] = None,
     factory: Optional[Callable[..., Any]] = None,
 ) -> None:
+
+    if cls is not None:
+        # generate and register a customized text loader
+        dumper = type(
+            f"Text{info.name.title()}Dumper",
+            (TextTupleDumper,),
+            {"oid": info.oid},
+        )
+        Dumper.register(cls, dumper, context=context, format=Format.BINARY)
+
+        # generate and register a customized binary loader
+        dumper = type(
+            f"Binary{info.name.title()}Dumper",
+            (BinaryTupleDumper,),
+            {
+                "oid": info.oid,
+                "fields_oids": tuple(f.type_oid for f in info.fields),
+            },
+        )
+        Dumper.register(cls, dumper, context=context, format=Format.BINARY)
+
     if factory is None:
         factory = namedtuple(  # type: ignore
             info.name, [f.name for f in info.fields]
@@ -119,15 +142,45 @@ where t.typname = %(name)s
 """
 
 
-@Dumper.text(tuple)
-class TextTupleDumper(Dumper):
+class BaseTupleDumper(Dumper):
     def __init__(self, src: type, context: AdaptContext = None):
         super().__init__(src, context)
         self._tx = Transformer(context)
 
+
+class BinaryTupleDumper(BaseTupleDumper):
+    # subclasses must set them
+    oid: int
+
+    # TODO: we would need to associate dump functions to oid, not classes
+    fields_oids: Tuple[int]
+
+    def dump(self, obj: Tuple[Any, ...]) -> Tuple[bytes, int]:
+        data = [_struct_len.pack(len(obj))]
+        for item in obj:
+            ad = self._tx.dump(item, format=Format.BINARY)
+            if isinstance(ad, tuple):
+                ad, oid = ad
+            else:
+                oid = TEXT_OID
+
+            if ad is None:
+                data.append(_struct_oidlen.pack(oid, -1))
+            else:
+                data.append(_struct_oidlen.pack(oid, len(ad)))
+                data.append(ad)
+
+        return b"".join(data), self.oid
+
+
+@Dumper.text(tuple)
+class TextTupleDumper(BaseTupleDumper):
+    # Subclasses can customize it to return a specific type
+    oid = TEXT_OID
+
     def dump(self, obj: Tuple[Any, ...]) -> Tuple[bytes, int]:
         if not obj:
-            return b"()", TEXT_OID
+            return b"()", self.oid
 
         parts = [b"("]
 
@@ -151,7 +204,7 @@ class TextTupleDumper(Dumper):
 
         parts[-1] = b")"
 
-        return b"".join(parts), TEXT_OID
+        return b"".join(parts), self.oid
 
     _re_needs_quotes = re.compile(
         br"""(?xi)
