@@ -1,5 +1,5 @@
 """
-libpq Python wrapper using ctypes bindings.
+libpq Python wrapper using cffi bindings.
 
 Clients shouldn't use this module directly, unless for testing: they should use
 the `pq` module instead, which is in charge of choosing the best
@@ -8,10 +8,10 @@ implementation.
 
 # Copyright (C) 2020 The Psycopg Team
 
-from ctypes import Array, pointer, string_at
-from ctypes import c_char_p, c_int, c_size_t, c_ulong
 from typing import Any, Callable, List, Optional, Sequence
 from typing import cast as t_cast, TYPE_CHECKING
+
+from cffi import FFI
 
 from .enums import (
     ConnStatus,
@@ -23,13 +23,13 @@ from .enums import (
     Format,
 )
 from .misc import error_message, ConninfoOption
-from . import _pq_ctypes as impl
+from ._pq_cffi import lib as impl, ffi
 from ..errors import OperationalError
 
 if TYPE_CHECKING:
     from psycopg3 import pq  # noqa
 
-__impl__ = "ctypes"
+__impl__ = "cffi"
 
 
 def version() -> int:
@@ -43,8 +43,8 @@ class PQerror(OperationalError):
 class PGconn:
     __slots__ = ("pgconn_ptr",)
 
-    def __init__(self, pgconn_ptr: impl.PGconn_struct):
-        self.pgconn_ptr: Optional[impl.PGconn_struct] = pgconn_ptr
+    def __init__(self, pgconn_ptr):
+        self.pgconn_ptr = pgconn_ptr
 
     def __del__(self) -> None:
         self.finish()
@@ -74,8 +74,8 @@ class PGconn:
         return PollingStatus(rv)
 
     def finish(self) -> None:
-        self.pgconn_ptr, p = None, self.pgconn_ptr
-        if p is not None:
+        self.pgconn_ptr, p = ffi.NULL, self.pgconn_ptr
+        if p:
             impl.PQfinish(p)
 
     @property
@@ -127,7 +127,14 @@ class PGconn:
 
     @property
     def hostaddr(self) -> bytes:
-        return self._call_bytes(impl.PQhostaddr)
+        pq = self._get_lipq12()
+        if pq is not None:
+            return self._call_bytes(pq.PQhostaddr)
+        else:
+            raise NotSupportedError(
+                "PQhostaddr requires libpq from PostgreSQL 12,"
+                f" {version()} available instead"
+            )
 
     @property
     def port(self) -> bytes:
@@ -153,11 +160,12 @@ class PGconn:
 
     def parameter_status(self, name: bytes) -> Optional[bytes]:
         self._ensure_pgconn()
-        return impl.PQparameterStatus(self.pgconn_ptr, name)
+        rv = impl.PQparameterStatus(self.pgconn_ptr, name)
+        return ffi.string(rv) if rv else None
 
     @property
     def error_message(self) -> bytes:
-        return impl.PQerrorMessage(self.pgconn_ptr)
+        return ffi.string(impl.PQerrorMessage(self.pgconn_ptr))
 
     @property
     def protocol_version(self) -> int:
@@ -247,13 +255,12 @@ class PGconn:
         command: bytes,
         param_types: Optional[Sequence[int]] = None,
     ) -> None:
-        atypes: Optional[Array[impl.Oid]]
         if param_types is None:
             nparams = 0
-            atypes = None
+            atypes = ffi.NULL
         else:
             nparams = len(param_types)
-            atypes = (impl.Oid * nparams)(*param_types)
+            atypes = ffi.new(f"Oid[{nparams}]", tuple(param_types))
 
         self._ensure_pgconn()
         if not impl.PQsendPrepare(
@@ -297,34 +304,41 @@ class PGconn:
             raise TypeError(f"bytes expected, got {type(command)} instead")
 
         nparams = len(param_values) if param_values is not None else 0
-        aparams: Optional[Array[c_char_p]] = None
-        alenghts: Optional[Array[c_int]] = None
-        if param_values:
-            aparams = (c_char_p * nparams)(*param_values)
-            alenghts = (c_int * nparams)(
-                *(len(p) if p is not None else 0 for p in param_values)
-            )
 
-        atypes: Optional[Array[impl.Oid]]
+        if param_values:
+            aparams = ffi.new(
+                f"char*[{nparams}]",
+                tuple(
+                    ffi.from_buffer(v) if v is not None else ffi.NULL
+                    for v in param_values
+                ),
+            )
+            alenghts = ffi.new(
+                f"int[{nparams}]",
+                tuple(len(p) if p is not None else 0 for p in param_values),
+            )
+        else:
+            aparams = alenghts = ffi.NULL
+
         if param_types is None:
-            atypes = None
+            atypes = ffi.NULL
         else:
             if len(param_types) != nparams:
                 raise ValueError(
                     "got %d param_values but %d param_types"
                     % (nparams, len(param_types))
                 )
-            atypes = (impl.Oid * nparams)(*param_types)
+            atypes = ffi.new(f"Oid[{nparams}]", tuple(param_types))
 
         if param_formats is None:
-            aformats = None
+            aformats = ffi.NULL
         else:
             if len(param_formats) != nparams:
                 raise ValueError(
                     "got %d param_values but %d param_types"
                     % (nparams, len(param_formats))
                 )
-            aformats = (c_int * nparams)(*param_formats)
+            aformats = ffi.new(f"int[{nparams}]", tuple(param_formats))
 
         return (
             self.pgconn_ptr,
@@ -353,10 +367,10 @@ class PGconn:
 
         if param_types is None:
             nparams = 0
-            atypes = None
+            atypes = ffi.NULL
         else:
             nparams = len(param_types)
-            atypes = (impl.Oid * nparams)(*param_types)
+            atypes = ffi.new(f"Oid[{nparams}]", tuple(param_types))
 
         self._ensure_pgconn()
         rv = impl.PQprepare(self.pgconn_ptr, name, command, nparams, atypes)
@@ -375,23 +389,30 @@ class PGconn:
             raise TypeError(f"'name' must be bytes, got {type(name)} instead")
 
         nparams = len(param_values) if param_values is not None else 0
-        aparams: Optional[Array[c_char_p]] = None
-        alenghts: Optional[Array[c_int]] = None
         if param_values:
-            aparams = (c_char_p * nparams)(*param_values)
-            alenghts = (c_int * nparams)(
-                *(len(p) if p is not None else 0 for p in param_values)
+            aparams = ffi.new(
+                f"char*[{nparams}]",
+                tuple(
+                    ffi.from_buffer(v) if v is not None else ffi.NULL
+                    for v in param_values
+                ),
             )
+            alenghts = ffi.new(
+                f"int[{nparams}]",
+                tuple(len(p) if p is not None else 0 for p in param_values),
+            )
+        else:
+            aparams, alenghts = ffi.NULL
 
         if param_formats is None:
-            aformats = None
+            aformats = ffi.NULL
         else:
             if len(param_formats) != nparams:
                 raise ValueError(
                     "got %d param_values but %d param_types"
                     % (nparams, len(param_formats))
                 )
-            aformats = (c_int * nparams)(*param_formats)
+            aformats = ffi.new(f"int[{nparams}]", tuple(param_formats))
 
         self._ensure_pgconn()
         rv = impl.PQexecPrepared(
@@ -466,7 +487,7 @@ class PGconn:
         return PGresult(rv)
 
     def _call_bytes(
-        self, func: Callable[[impl.PGconn_struct], Optional[bytes]]
+        self, func: Callable[["PGconn_struct"], Optional[bytes]]
     ) -> bytes:
         """
         Call one of the pgconn libpq functions returning a bytes pointer.
@@ -474,10 +495,10 @@ class PGconn:
         if not self.pgconn_ptr:
             raise PQerror("the connection is closed")
         rv = func(self.pgconn_ptr)
-        assert rv is not None
-        return rv
+        assert rv
+        return ffi.string(rv)
 
-    def _call_int(self, func: Callable[[impl.PGconn_struct], int]) -> int:
+    def _call_int(self, func: Callable[["PGconn_struct"], int]) -> int:
         """
         Call one of the pgconn libpq functions returning an int.
         """
@@ -485,7 +506,7 @@ class PGconn:
             raise PQerror("the connection is closed")
         return func(self.pgconn_ptr)
 
-    def _call_bool(self, func: Callable[[impl.PGconn_struct], int]) -> bool:
+    def _call_bool(self, func: Callable[["PGconn_struct"], int]) -> bool:
         """
         Call one of the pgconn libpq functions returning a logical value.
         """
@@ -497,19 +518,37 @@ class PGconn:
         if not self.pgconn_ptr:
             raise PQerror("the connection is closed")
 
+    libpq12: None
+
+    @classmethod
+    def _get_lipq12(cls):
+        try:
+            return cls.libpq12
+        except Exception:
+            pass
+
+        if version() >= 120000:
+            ffi = FFI()
+            ffi.cdef("char *PQhostaddr(void *conn);")
+            cls.libpq12 = ffi.dlopen("pq")
+        else:
+            cls.libpq12 = None
+
+        return cls.libpq12
+
 
 class PGresult:
     __slots__ = ("pgresult_ptr",)
 
-    def __init__(self, pgresult_ptr: impl.PGresult_struct):
-        self.pgresult_ptr: Optional[impl.PGresult_struct] = pgresult_ptr
+    def __init__(self, pgresult_ptr: "PGresult_struct"):
+        self.pgresult_ptr: Optional["PGresult_struct"] = pgresult_ptr
 
     def __del__(self) -> None:
         self.clear()
 
     def clear(self) -> None:
-        self.pgresult_ptr, p = None, self.pgresult_ptr
-        if p is not None:
+        self.pgresult_ptr, p = ffi.NULL, self.pgresult_ptr
+        if p:
             impl.PQclear(p)
 
     @property
@@ -519,10 +558,11 @@ class PGresult:
 
     @property
     def error_message(self) -> bytes:
-        return impl.PQresultErrorMessage(self.pgresult_ptr)
+        return ffi.string(impl.PQresultErrorMessage(self.pgresult_ptr))
 
     def error_field(self, fieldcode: DiagnosticField) -> Optional[bytes]:
-        return impl.PQresultErrorField(self.pgresult_ptr, fieldcode)
+        rv = impl.PQresultErrorField(self.pgresult_ptr, fieldcode)
+        return ffi.string(rv) if rv else None
 
     @property
     def ntuples(self) -> int:
@@ -533,7 +573,8 @@ class PGresult:
         return impl.PQnfields(self.pgresult_ptr)
 
     def fname(self, column_number: int) -> Optional[bytes]:
-        return impl.PQfname(self.pgresult_ptr, column_number)
+        rv = impl.PQfname(self.pgresult_ptr, column_number)
+        return ffi.string(rv) if rv else None
 
     def ftable(self, column_number: int) -> int:
         return impl.PQftable(self.pgresult_ptr, column_number)
@@ -565,7 +606,8 @@ class PGresult:
         )
         if length:
             v = impl.PQgetvalue(self.pgresult_ptr, row_number, column_number)
-            return string_at(v, length)
+            # TODO: zero copy?
+            return ffi.unpack(v, length)
         else:
             if impl.PQgetisnull(self.pgresult_ptr, row_number, column_number):
                 return None
@@ -581,11 +623,12 @@ class PGresult:
 
     @property
     def command_status(self) -> Optional[bytes]:
-        return impl.PQcmdStatus(self.pgresult_ptr)
+        rv = impl.PQcmdStatus(self.pgresult_ptr)
+        return ffi.string(rv) if rv else None
 
     @property
     def command_tuples(self) -> Optional[int]:
-        rv = impl.PQcmdTuples(self.pgresult_ptr)
+        rv = ffi.string(impl.PQcmdTuples(self.pgresult_ptr))
         return int(rv) if rv else None
 
     @property
@@ -611,13 +654,14 @@ class Conninfo:
                 f"bytes expected, got {type(conninfo).__name__} instead"
             )
 
-        errmsg = c_char_p()
-        rv = impl.PQconninfoParse(conninfo, pointer(errmsg))
+        p_errmsg = ffi.new("char **")
+        rv = impl.PQconninfoParse(conninfo, p_errmsg)
         if not rv:
+            errmsg = p_errmsg[0]
             if not errmsg:
                 raise MemoryError("couldn't allocate on conninfo parse")
             else:
-                exc = PQerror((errmsg.value or b"").decode("utf8", "replace"))
+                exc = PQerror((ffi.string(errmsg)).decode("utf8", "replace"))
                 impl.PQfreemem(errmsg)
                 raise exc
 
@@ -628,16 +672,23 @@ class Conninfo:
 
     @classmethod
     def _options_from_array(
-        cls, opts: Sequence[impl.PQconninfoOption_struct]
+        cls, opts: Sequence["PQconninfoOption_struct"]
     ) -> List[ConninfoOption]:
+        def getkw(opt, kw):
+            val = getattr(opt, kw)
+            return ffi.string(val) if val else None
+
         rv = []
         skws = "keyword envvar compiled val label dispchar".split()
-        for opt in opts:
+        i = 0
+        while True:
+            opt = opts[i]
             if not opt.keyword:
                 break
-            d = {kw: getattr(opt, kw) for kw in skws}
+            d = {kw: getkw(opt, kw) for kw in skws}
             d["dispsize"] = opt.dispsize
             rv.append(ConninfoOption(**d))
+            i += 1
 
         return rv
 
@@ -647,25 +698,22 @@ class Escaping:
         self.conn = conn
 
     def escape_bytea(self, data: bytes) -> bytes:
-        len_out = c_size_t()
+        len_out = ffi.new("size_t *")
         if self.conn is not None:
             self.conn._ensure_pgconn()
             out = impl.PQescapeByteaConn(
-                self.conn.pgconn_ptr,
-                data,
-                len(data),
-                pointer(t_cast(c_ulong, len_out)),
+                self.conn.pgconn_ptr, data, len(data), len_out
             )
         else:
-            out = impl.PQescapeBytea(
-                data, len(data), pointer(t_cast(c_ulong, len_out)),
-            )
+            out = impl.PQescapeBytea(data, len(data), len_out,)
         if not out:
             raise MemoryError(
                 f"couldn't allocate for escape_bytea of {len(data)} bytes"
             )
 
-        rv = string_at(out, len_out.value - 1)  # out includes final 0
+        # out includes final 0
+        rv = ffi.unpack(ffi.cast("char *", out), len_out[0] - 1)
+        # TODO: can it be done without a copy using ffi.buffer()?
         impl.PQfreemem(out)
         return rv
 
@@ -675,13 +723,14 @@ class Escaping:
         if self.conn is not None:
             self.conn._ensure_pgconn()
 
-        len_out = c_size_t()
-        out = impl.PQunescapeBytea(data, pointer(t_cast(c_ulong, len_out)))
+        len_out = ffi.new("size_t *")
+        out = impl.PQunescapeBytea(data, len_out)
         if not out:
             raise MemoryError(
                 f"couldn't allocate for unescape_bytea of {len(data)} bytes"
             )
 
-        rv = string_at(out, len_out.value)
+        rv = ffi.unpack(ffi.cast("char *", out), len_out[0])
+        # TODO: can it be done without a copy using ffi.buffer()?
         impl.PQfreemem(out)
         return rv

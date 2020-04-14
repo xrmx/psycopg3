@@ -45,6 +45,9 @@ setup(
     python_requires=">=3.6",
     packages=find_packages(exclude=["tests"]),
     classifiers=[x for x in classifiers.split("\n") if x],
+    setup_requires=["cffi>=1.14.0,<2"],
+    install_requires=["cffi>=1.14.0,<2"],
+    cffi_modules=["psycopg3/pq/_pq_cffi_build.py:ffibuilder"],
     zip_safe=False,
     version=version,
     project_urls={

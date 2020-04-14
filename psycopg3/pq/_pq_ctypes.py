@@ -85,10 +85,6 @@ PQconndefaults = pq.PQconndefaults
 PQconndefaults.argtypes = []
 PQconndefaults.restype = PQconninfoOption_ptr
 
-PQconninfoFree = pq.PQconninfoFree
-PQconninfoFree.argtypes = [PQconninfoOption_ptr]
-PQconninfoFree.restype = None
-
 PQconninfo = pq.PQconninfo
 PQconninfo.argtypes = [PGconn_ptr]
 PQconninfo.restype = PQconninfoOption_ptr
@@ -455,6 +451,10 @@ PQflush.restype == c_int
 PQfreemem = pq.PQfreemem
 PQfreemem.argtypes = [c_void_p]
 PQfreemem.restype = None
+
+PQconninfoFree = pq.PQconninfoFree
+PQconninfoFree.argtypes = [PQconninfoOption_ptr]
+PQconninfoFree.restype = None
 
 PQmakeEmptyPGresult = pq.PQmakeEmptyPGresult
 PQmakeEmptyPGresult.argtypes = [PGconn_ptr, c_int]
