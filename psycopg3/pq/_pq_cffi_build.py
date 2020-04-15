@@ -232,6 +232,10 @@ int PQflush(PGconn *conn);
 void PQfreemem(void *ptr);
 void PQconninfoFree(PQconninfoOption *connOptions);
 PGresult *PQmakeEmptyPGresult(PGconn *conn, ExecStatusType status);
+
+/* Optimized functions */
+const char *pg3_get_value(const PGresult *result,
+                          int row, int column, int *length);
 """
 )
 
@@ -247,6 +251,20 @@ ffibuilder.set_source(
     "psycopg3.pq._pq_cffi",
     """
 #include <libpq-fe.h>
+
+const char *
+pg3_get_value(const PGresult *result, int row, int column, int *length)
+{
+    if ((*length = PQgetlength(result, row, column))) {
+        return PQgetvalue(result, row, column);
+    }
+    else {
+        if (PQgetisnull(result, row, column))
+            return NULL;
+        else
+            return "";
+    }
+}
     """,
     include_dirs=[includedir],
     libraries=["pq"],

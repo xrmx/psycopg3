@@ -1,4 +1,9 @@
+import codecs
 import pytest
+
+
+def decode_ascii(b):
+    return codecs.lookup("ascii").decode(b)[0]
 
 
 @pytest.mark.parametrize(
@@ -86,8 +91,8 @@ def test_ftable_and_col(pq, pgconn):
     )
     assert res.status == pq.ExecStatus.TUPLES_OK, res.error_message
 
-    assert res.ftable(0) == int(res.get_value(0, 2).decode("ascii"))
-    assert res.ftable(1) == int(res.get_value(0, 3).decode("ascii"))
+    assert res.ftable(0) == int(decode_ascii(res.get_value(0, 2)))
+    assert res.ftable(1) == int(decode_ascii(res.get_value(0, 3)))
     assert res.ftablecol(0) == 1
     assert res.ftablecol(1) == 2
     res.clear()

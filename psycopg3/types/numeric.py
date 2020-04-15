@@ -119,15 +119,15 @@ def load_numeric(data: bytes) -> Decimal:
     return Decimal(_decode(data)[0])
 
 
-_bool_loads = {b"t": True, b"f": False}
-_bool_binary_loads = {b"\x01": True, b"\x00": False}
+_bool_loads = {b"t": True, ord("t"): True, b"f": False, ord("f"): False}
+_bool_binary_loads = {b"\x01": True, 1: True, b"\x00": False, 0: False}
 
 
 @Loader.text(builtins["bool"].oid)
 def load_bool(data: bytes) -> bool:
-    return _bool_loads[data]
+    return _bool_loads[data[0]]
 
 
 @Loader.binary(builtins["bool"].oid)
 def load_binary_bool(data: bytes) -> bool:
-    return _bool_binary_loads[data]
+    return _bool_binary_loads[data[0]]

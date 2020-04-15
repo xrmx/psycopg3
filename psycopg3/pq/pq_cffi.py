@@ -8,7 +8,7 @@ implementation.
 
 # Copyright (C) 2020 The Psycopg Team
 
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Union
 from typing import cast as t_cast, TYPE_CHECKING
 
 from cffi import FFI
@@ -24,7 +24,7 @@ from .enums import (
 )
 from .misc import error_message, ConninfoOption
 from ._pq_cffi import lib as impl, ffi
-from ..errors import OperationalError
+from ..errors import OperationalError, NotSupportedError
 
 if TYPE_CHECKING:
     from psycopg3 import pq  # noqa
@@ -69,9 +69,9 @@ class PGconn:
             raise MemoryError("couldn't allocate PGconn")
         return cls(pgconn_ptr)
 
-    def connect_poll(self) -> PollingStatus:
+    def connect_poll(self) -> Union[int, PollingStatus]:
         rv = self._call_int(impl.PQconnectPoll)
-        return PollingStatus(rv)
+        return rv
 
     def finish(self) -> None:
         self.pgconn_ptr, p = ffi.NULL, self.pgconn_ptr
@@ -97,9 +97,9 @@ class PGconn:
         if not impl.PQresetStart(self.pgconn_ptr):
             raise PQerror("couldn't reset connection")
 
-    def reset_poll(self) -> PollingStatus:
+    def reset_poll(self) -> Union[int, PollingStatus]:
         rv = self._call_int(impl.PQresetPoll)
-        return PollingStatus(rv)
+        return rv
 
     @classmethod
     def ping(self, conninfo: bytes) -> Ping:
@@ -127,9 +127,9 @@ class PGconn:
 
     @property
     def hostaddr(self) -> bytes:
-        pq = self._get_lipq12()
-        if pq is not None:
-            return self._call_bytes(pq.PQhostaddr)
+        lib = self._get_lipq12()
+        if lib is not None:
+            return self._call_bytes(lib.PQhostaddr)  # type: ignore
         else:
             raise NotSupportedError(
                 "PQhostaddr requires libpq from PostgreSQL 12,"
@@ -149,14 +149,14 @@ class PGconn:
         return self._call_bytes(impl.PQoptions)
 
     @property
-    def status(self) -> ConnStatus:
+    def status(self) -> Union[ConnStatus, int]:
         rv = impl.PQstatus(self.pgconn_ptr)
-        return ConnStatus(rv)
+        return rv
 
     @property
-    def transaction_status(self) -> TransactionStatus:
+    def transaction_status(self) -> Union[TransactionStatus, int]:
         rv = impl.PQtransactionStatus(self.pgconn_ptr)
-        return TransactionStatus(rv)
+        return rv
 
     def parameter_status(self, name: bytes) -> Optional[bytes]:
         self._ensure_pgconn()
@@ -538,10 +538,11 @@ class PGconn:
 
 
 class PGresult:
-    __slots__ = ("pgresult_ptr",)
+    __slots__ = ("pgresult_ptr", "_length")
 
     def __init__(self, pgresult_ptr: "PGresult_struct"):
         self.pgresult_ptr: Optional["PGresult_struct"] = pgresult_ptr
+        self._length = ffi.new("int *")
 
     def __del__(self) -> None:
         self.clear()
@@ -554,7 +555,7 @@ class PGresult:
     @property
     def status(self) -> ExecStatus:
         rv = impl.PQresultStatus(self.pgresult_ptr)
-        return ExecStatus(rv)
+        return rv
 
     @property
     def error_message(self) -> bytes:
@@ -583,7 +584,7 @@ class PGresult:
         return impl.PQftablecol(self.pgresult_ptr, column_number)
 
     def fformat(self, column_number: int) -> Format:
-        return Format(impl.PQfformat(self.pgresult_ptr, column_number))
+        return impl.PQfformat(self.pgresult_ptr, column_number)
 
     def ftype(self, column_number: int) -> int:
         return impl.PQftype(self.pgresult_ptr, column_number)
@@ -596,23 +597,18 @@ class PGresult:
 
     @property
     def binary_tuples(self) -> Format:
-        return Format(impl.PQbinaryTuples(self.pgresult_ptr))
+        return impl.PQbinaryTuples(self.pgresult_ptr)
 
     def get_value(
         self, row_number: int, column_number: int
     ) -> Optional[bytes]:
-        length: int = impl.PQgetlength(
-            self.pgresult_ptr, row_number, column_number
+        p = impl.pg3_get_value(
+            self.pgresult_ptr, row_number, column_number, self._length
         )
-        if length:
-            v = impl.PQgetvalue(self.pgresult_ptr, row_number, column_number)
-            # TODO: zero copy?
-            return ffi.unpack(v, length)
+        if p:
+            return ffi.buffer(p, self._length[0])
         else:
-            if impl.PQgetisnull(self.pgresult_ptr, row_number, column_number):
-                return None
-            else:
-                return b""
+            return None
 
     @property
     def nparams(self) -> int:
@@ -674,7 +670,7 @@ class Conninfo:
     def _options_from_array(
         cls, opts: Sequence["PQconninfoOption_struct"]
     ) -> List[ConninfoOption]:
-        def getkw(opt, kw):
+        def getkw(opt, kw: str) -> str:
             val = getattr(opt, kw)
             return ffi.string(val) if val else None
 
@@ -724,7 +720,7 @@ class Escaping:
             self.conn._ensure_pgconn()
 
         len_out = ffi.new("size_t *")
-        out = impl.PQunescapeBytea(data, len_out)
+        out = impl.PQunescapeBytea(ffi.from_buffer(data), len_out)
         if not out:
             raise MemoryError(
                 f"couldn't allocate for unescape_bytea of {len(data)} bytes"

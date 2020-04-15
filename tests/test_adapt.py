@@ -1,8 +1,15 @@
+import codecs
 import pytest
 from psycopg3.adapt import Transformer, Format, Dumper, Loader
 from psycopg3.types.oids import builtins
 
 TEXT_OID = builtins["text"].oid
+
+ascii_codec = codecs.lookup("ascii")
+
+
+def decode_ascii(b):
+    return ascii_codec.decode(b)[0]
 
 
 @pytest.mark.parametrize(
@@ -67,8 +74,8 @@ def test_cast(data, format, type, result):
 
 
 def test_load_connection_ctx(conn):
-    Loader.register(TEXT_OID, lambda b: b.decode("ascii") + "t", conn)
-    Loader.register_binary(TEXT_OID, lambda b: b.decode("ascii") + "b", conn)
+    Loader.register(TEXT_OID, lambda b: decode_ascii(b) + "t", conn)
+    Loader.register_binary(TEXT_OID, lambda b: decode_ascii(b) + "b", conn)
 
     r = conn.cursor().execute("select 'hello'::text").fetchone()
     assert r == ("hellot",)
@@ -77,12 +84,12 @@ def test_load_connection_ctx(conn):
 
 
 def test_load_cursor_ctx(conn):
-    Loader.register(TEXT_OID, lambda b: b.decode("ascii") + "t", conn)
-    Loader.register_binary(TEXT_OID, lambda b: b.decode("ascii") + "b", conn)
+    Loader.register(TEXT_OID, lambda b: decode_ascii(b) + "t", conn)
+    Loader.register_binary(TEXT_OID, lambda b: decode_ascii(b) + "b", conn)
 
     cur = conn.cursor()
-    Loader.register(TEXT_OID, lambda b: b.decode("ascii") + "tc", cur)
-    Loader.register_binary(TEXT_OID, lambda b: b.decode("ascii") + "bc", cur)
+    Loader.register(TEXT_OID, lambda b: decode_ascii(b) + "tc", cur)
+    Loader.register_binary(TEXT_OID, lambda b: decode_ascii(b) + "bc", cur)
 
     r = cur.execute("select 'hello'::text").fetchone()
     assert r == ("hellotc",)
@@ -106,7 +113,7 @@ def test_load_cursor_ctx(conn):
 def test_load_cursor_ctx_nested(conn, sql, obj, fmt_out):
     cur = conn.cursor(binary=fmt_out == Format.BINARY)
     Loader.register(
-        TEXT_OID, lambda b: b.decode("ascii") + "c", cur, format=fmt_out
+        TEXT_OID, lambda b: decode_ascii(b) + "c", cur, format=fmt_out
     )
     cur.execute(f"select {sql}")
     res = cur.fetchone()[0]
