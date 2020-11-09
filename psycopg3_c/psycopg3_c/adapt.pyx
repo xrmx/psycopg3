@@ -28,13 +28,15 @@ logger = logging.getLogger("psycopg3.adapt")
 
 cdef class CLoader:
     cdef impl.Oid oid
+    cdef int fmod
     cdef object context
     cdef object connection
 
-    def __init__(self, oid: int, context: "AdaptContext" = None):
+    def __init__(self, oid: int, fmod: int = -1, context: "AdaptContext" = None):
         from psycopg3.adapt import _connection_from_context
 
         self.oid = oid
+        self.fmod = fmod
         self.context = context
         self.connection = _connection_from_context(context)
 

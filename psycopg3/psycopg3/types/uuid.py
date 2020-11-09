@@ -34,8 +34,8 @@ class UUIDBinaryDumper(UUIDDumper):
 
 @Loader.text(builtins["uuid"].oid)
 class UUIDLoader(Loader):
-    def __init__(self, oid: int, context: AdaptContext = None):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         global UUID
         from uuid import UUID
 

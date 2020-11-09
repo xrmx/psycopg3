@@ -70,7 +70,12 @@ class Transformer(Protocol):
     def loaders(self) -> LoadersMap:
         ...
 
-    def set_row_types(self, types: Sequence[Tuple[int, Format]]) -> None:
+    def set_row_types(
+        self,
+        types: Sequence[int],
+        formats: Sequence[Format],
+        fmods: Sequence[int] = (),
+    ) -> None:
         ...
 
     def get_dumper(self, obj: Any, format: Format) -> "Dumper":

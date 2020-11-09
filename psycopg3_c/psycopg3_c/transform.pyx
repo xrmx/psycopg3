@@ -42,8 +42,8 @@ cdef class Transformer:
     cdef PGresult _pgresult
     cdef int _nfields, _ntuples
     cdef str _encoding
-
     cdef list _row_loaders
+    cdef dict _row_loaders_cache
 
     def __cinit__(self, context: "AdaptContext" = None):
         self._dumpers_maps: List["DumpersMap"] = []
@@ -53,8 +53,11 @@ cdef class Transformer:
         # mapping class, fmt -> Dumper instance
         self._dumpers_cache: Dict[Tuple[type, Format], "Dumper"] = {}
 
-        # mapping oid, fmt -> Loader instance
-        self._loaders_cache: Dict[Tuple[int, Format], "Loader"] = {}
+        # mapping oid, fmt, fmod -> Loader instance
+        self._loaders_cache: Dict[Tuple[int, Format, int], "Loader"] = {}
+
+        # mapping oid, fmt, fmod -> RowLoader instance
+        self._row_loaders_cache: Dict[Tuple[int, Format, int], "RowLoader"] = {}
 
         # mapping oid, fmt -> load function
         self._load_funcs: Dict[Tuple[int, Format], "LoadFunc"] = {}
@@ -145,29 +148,36 @@ cdef class Transformer:
         self._ntuples = libpq.PQntuples(res)
 
         cdef int i
-        types = [
-            (libpq.PQftype(res, i), libpq.PQfformat(res, i))
-            for i in range(self._nfields)]
-        self.set_row_types(types)
+        cdef list types = []
+        cdef list formats = []
+        cdef list fmods = []
+        for i in range(self._nfields):
+            types.append(libpq.PQftype(res, i))
+            formats.append(libpq.PQfformat(res, i))
+            fmods.append(libpq.PQfmod(res, i))
 
-    def set_row_types(self, types: Sequence[Tuple[int, Format]]) -> None:
+        self.set_row_types(types, formats, fmods)
+
+    def set_row_types(
+        self,
+        types: Sequence[int],
+        formats: Sequence[Format],
+        fmods: Sequence[int] = (),
+    ) -> None:
         del self._row_loaders[:]
 
-        cdef int i = 0
-        cdef dict seen = {}
-        for oid_fmt in types:
-            if oid_fmt not in seen:
-                self._row_loaders.append(
-                    self._get_row_loader(oid_fmt[0], oid_fmt[1]))
-                seen[oid_fmt] = i
-            else:
-                self._row_loaders.append(self._row_loaders[seen[oid_fmt]])
+        cdef int i
+        for i in range(len(types)):
+            self._row_loaders.append(self._get_row_loader(
+                types[i], formats[i], fmods[i] if fmods else -1))
 
-            i += 1
+    cdef RowLoader _get_row_loader(self, oid: int, format: Format, fmod: int):
+        key = (oid, format, fmod)
+        if key in self._row_loaders_cache:
+            return self._row_loaders_cache[key]
 
-    cdef RowLoader _get_row_loader(self, libpq.Oid oid, int fmt):
         cdef RowLoader row_loader = RowLoader()
-        loader = self.get_loader(oid, fmt)
+        loader = self.get_loader(oid, format, fmod)
         row_loader.pyloader = loader.load
 
         if isinstance(loader, CLoader):
@@ -175,6 +185,7 @@ cdef class Transformer:
         else:
             row_loader.cloader = None
 
+        self._row_loaders_cache[key] = row_loader
         return row_loader
 
     def get_dumper(self, obj: Any, format: Format) -> "Dumper":
@@ -269,20 +280,21 @@ cdef class Transformer:
 
         return tuple(rv)
 
-    def get_loader(self, oid: int, format: Format) -> "Loader":
-        key = (oid, format)
+    def get_loader(self, oid: int, format: Format, fmod: int = -1) -> "Loader":
+        key = (oid, format, fmod)
         try:
             return self._loaders_cache[key]
         except KeyError:
             pass
 
+        ckey = (oid, format)
         for tcmap in self._loaders_maps:
-            if key in tcmap:
-                loader_cls = tcmap[key]
+            if ckey in tcmap:
+                loader_cls = tcmap[ckey]
                 break
         else:
             from psycopg3.adapt import Loader
             loader_cls = Loader.globals[0, format]    # INVALID_OID
 
-        self._loaders_cache[key] = loader = loader_cls(key[0], self)
+        self._loaders_cache[key] = loader = loader_cls(oid, fmod, self)
         return loader

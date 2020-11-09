@@ -46,8 +46,8 @@ class NetworkDumper(Dumper):
 
 
 class _LazyIpaddress(Loader):
-    def __init__(self, oid: int, context: AdaptContext = None):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         global ip_address, ip_interface, ip_network
         from ipaddress import ip_address, ip_interface, ip_network
 

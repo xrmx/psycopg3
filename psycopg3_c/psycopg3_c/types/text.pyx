@@ -13,8 +13,8 @@ cdef class TextLoader(CLoader):
     cdef char *encoding
     cdef bytes _bytes_encoding  # needed to keep `encoding` alive
 
-    def __init__(self, oid: int, context: "AdaptContext" = None):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: "AdaptContext" = None):
+        super().__init__(oid, fmod, context)
 
         self.is_utf8 = 0
         self.encoding = NULL

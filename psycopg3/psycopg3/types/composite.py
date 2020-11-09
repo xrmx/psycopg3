@@ -162,8 +162,8 @@ class TupleDumper(Dumper):
 
 
 class BaseCompositeLoader(Loader):
-    def __init__(self, oid: int, context: AdaptContext = None):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         self._tx = Transformer(context)
 
 
@@ -231,9 +231,9 @@ class RecordBinaryLoader(BaseCompositeLoader):
             i += (8 + length) if length > 0 else 8
 
     def _config_types(self, data: bytes) -> None:
-        self._tx.set_row_types(
-            [(oid, Format.BINARY) for oid, _, _ in self._walk_record(data)]
-        )
+        oids = [r[0] for r in self._walk_record(data)]
+        formats = [Format.BINARY] * len(oids)
+        self._tx.set_row_types(oids, formats)
 
 
 class CompositeLoader(RecordLoader):
@@ -252,7 +252,7 @@ class CompositeLoader(RecordLoader):
 
     def _config_types(self, data: bytes) -> None:
         self._tx.set_row_types(
-            [(oid, Format.TEXT) for oid in self.fields_types]
+            self.fields_types, [Format.TEXT] * len(self.fields_types)
         )
 
 

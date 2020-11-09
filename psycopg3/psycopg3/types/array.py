@@ -162,8 +162,8 @@ class ListBinaryDumper(BaseListDumper):
 class BaseArrayLoader(Loader):
     base_oid: int
 
-    def __init__(self, oid: int, context: AdaptContext = None):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         self._tx = Transformer(context)
 
 

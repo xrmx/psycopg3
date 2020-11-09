@@ -4,16 +4,13 @@ Adapters for textual types.
 
 # Copyright (C) 2020 The Psycopg Team
 
-from typing import Union, TYPE_CHECKING
+from typing import Union
 
 from ..pq import Escaping
 from ..oids import builtins, INVALID_OID
 from ..adapt import Dumper, Loader
 from ..proto import AdaptContext
 from ..errors import DataError
-
-if TYPE_CHECKING:
-    from ..pq.proto import Escaping as EscapingProto
 
 
 class _StringDumper(Dumper):
@@ -52,8 +49,8 @@ class StringDumper(_StringDumper):
 @Loader.binary(builtins["varchar"].oid)
 @Loader.text(INVALID_OID)
 class TextLoader(Loader):
-    def __init__(self, oid: int, context: AdaptContext):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
 
         if self.connection:
             if self.connection.client_encoding != "SQL_ASCII":
@@ -76,8 +73,8 @@ class TextLoader(Loader):
 @Loader.text(builtins["bpchar"].oid)
 @Loader.binary(builtins["bpchar"].oid)
 class UnknownLoader(Loader):
-    def __init__(self, oid: int, context: AdaptContext):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         self.encoding = self.connection.pyenc if self.connection else "utf-8"
 
     def load(self, data: bytes) -> str:
@@ -110,12 +107,7 @@ class BytesBinaryDumper(Dumper):
 
 @Loader.text(builtins["bytea"].oid)
 class ByteaLoader(Loader):
-    _escaping: "EscapingProto"
-
-    def __init__(self, oid: int, context: AdaptContext = None):
-        super().__init__(oid, context)
-        if not hasattr(self.__class__, "_escaping"):
-            self.__class__._escaping = Escaping()
+    _escaping = Escaping()
 
     def load(self, data: bytes) -> bytes:
         return self._escaping.unescape_bytea(data)

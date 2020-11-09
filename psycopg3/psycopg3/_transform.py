@@ -4,7 +4,7 @@ Helper object to transform values between Python and PostgreSQL
 
 # Copyright (C) 2020 The Psycopg Team
 
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from typing import TYPE_CHECKING
 
 from . import errors as e
@@ -42,8 +42,8 @@ class Transformer:
         # mapping class, fmt -> Dumper instance
         self._dumpers_cache: Dict[Tuple[type, Format], "Dumper"] = {}
 
-        # mapping oid, fmt -> Loader instance
-        self._loaders_cache: Dict[Tuple[int, Format], "Loader"] = {}
+        # mapping oid, format, fmod -> Loader instance
+        self._loaders_cache: Dict[Tuple[int, Format, int], "Loader"] = {}
 
         # mapping oid, fmt -> load function
         self._load_funcs: Dict[Tuple[int, Format], LoadFunc] = {}
@@ -113,7 +113,6 @@ class Transformer:
     @pgresult.setter
     def pgresult(self, result: Optional[pq.proto.PGresult]) -> None:
         self._pgresult = result
-        rc = self._row_loaders = []
 
         self._ntuples: int
         self._nfields: int
@@ -124,10 +123,15 @@ class Transformer:
         nf = self._nfields = result.nfields
         self._ntuples = result.ntuples
 
+        types = []
+        formats = []
+        fmods = []
         for i in range(nf):
-            oid = result.ftype(i)
-            fmt = result.fformat(i)
-            rc.append(self.get_loader(oid, fmt).load)
+            types.append(result.ftype(i))
+            formats.append(result.fformat(i))
+            fmods.append(result.fmod(i))
+
+        self.set_row_types(types, formats, fmods)
 
     @property
     def dumpers(self) -> DumpersMap:
@@ -137,10 +141,18 @@ class Transformer:
     def loaders(self) -> LoadersMap:
         return self._loaders
 
-    def set_row_types(self, types: Iterable[Tuple[int, Format]]) -> None:
-        rc = self._row_loaders = []
-        for oid, fmt in types:
-            rc.append(self.get_loader(oid, fmt).load)
+    def set_row_types(
+        self,
+        types: Sequence[int],
+        formats: Sequence[Format],
+        fmods: Sequence[int] = (),
+    ) -> None:
+        self._row_loaders = [
+            self.get_loader(
+                types[i], formats[i], fmods[i] if fmods else -1
+            ).load
+            for i in range(len(types))
+        ]
 
     def get_dumper(self, obj: Any, format: Format) -> "Dumper":
         # Fast path: return a Dumper class already instantiated from the same type
@@ -193,10 +205,9 @@ class Transformer:
         rv: List[Any] = []
         for col in range(self._nfields):
             val = res.get_value(row, col)
-            if val is None:
-                rv.append(None)
-            else:
-                rv.append(self._row_loaders[col](val))
+            if val is not None:
+                val = self._row_loaders[col](val)
+            rv.append(val)
 
         return tuple(rv)
 
@@ -208,21 +219,22 @@ class Transformer:
             for i, val in enumerate(record)
         )
 
-    def get_loader(self, oid: int, format: Format) -> "Loader":
-        key = (oid, format)
+    def get_loader(self, oid: int, format: Format, fmod: int = -1) -> "Loader":
+        key = (oid, format, fmod)
         try:
             return self._loaders_cache[key]
         except KeyError:
             pass
 
+        ckey = (oid, format)
         for tcmap in self._loaders_maps:
-            if key in tcmap:
-                loader_cls = tcmap[key]
+            if ckey in tcmap:
+                loader_cls = tcmap[ckey]
                 break
         else:
             from .adapt import Loader  # noqa
 
             loader_cls = Loader.globals[INVALID_OID, format]
 
-        self._loaders_cache[key] = loader = loader_cls(key[0], self)
+        self._loaders_cache[key] = loader = loader_cls(oid, fmod, self)
         return loader

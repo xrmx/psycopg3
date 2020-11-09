@@ -87,8 +87,9 @@ class Loader:
     globals: LoadersMap = {}
     connection: Optional[BaseConnection]
 
-    def __init__(self, oid: int, context: AdaptContext = None):
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
         self.oid = oid
+        self.fmod = fmod
         self.context = context
         self.connection = _connection_from_context(context)
 

@@ -75,8 +75,8 @@ class TimeDeltaDumper(Dumper):
 
 @Loader.text(builtins["date"].oid)
 class DateLoader(Loader):
-    def __init__(self, oid: int, context: AdaptContext):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         self._format = self._format_from_context()
 
     def load(self, data: bytes) -> date:
@@ -161,11 +161,11 @@ class TimeTzLoader(TimeLoader):
     _format = "%H:%M:%S.%f%z"
     _format_no_micro = _format.replace(".%f", "")
 
-    def __init__(self, oid: int, context: AdaptContext):
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
         if sys.version_info < (3, 7):
             setattr(self, "load", self._load_py36)
 
-        super().__init__(oid, context)
+        super().__init__(oid, fmod, context)
 
     def load(self, data: bytes) -> time:
         # Hack to convert +HH in +HHMM
@@ -193,8 +193,8 @@ class TimeTzLoader(TimeLoader):
 
 @Loader.text(builtins["timestamp"].oid)
 class TimestampLoader(DateLoader):
-    def __init__(self, oid: int, context: AdaptContext):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         self._format_no_micro = self._format.replace(".%f", "")
 
     def load(self, data: bytes) -> datetime:
@@ -245,11 +245,11 @@ class TimestampLoader(DateLoader):
 
 @Loader.text(builtins["timestamptz"].oid)
 class TimestamptzLoader(TimestampLoader):
-    def __init__(self, oid: int, context: AdaptContext):
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
         if sys.version_info < (3, 7):
             setattr(self, "load", self._load_py36)
 
-        super().__init__(oid, context)
+        super().__init__(oid, fmod, context)
 
     def _format_from_context(self) -> str:
         ds = self._get_datestyle()
@@ -321,8 +321,8 @@ class IntervalLoader(Loader):
         re.VERBOSE,
     )
 
-    def __init__(self, oid: int, context: AdaptContext):
-        super().__init__(oid, context)
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
         if self.connection:
             ints = self.connection.pgconn.parameter_status(b"IntervalStyle")
             if ints != b"postgres":
