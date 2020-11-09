@@ -5,7 +5,7 @@ Adapers for numeric types.
 # Copyright (C) 2020 The Psycopg Team
 
 import struct
-from typing import Any, Callable, Dict, Tuple, cast
+from typing import Any, Callable, Dict, Tuple, Union, cast
 from decimal import Decimal
 
 from ..oids import builtins
@@ -199,5 +199,8 @@ class Float8BinaryLoader(Loader):
 
 @Loader.text(builtins["numeric"].oid)
 class NumericLoader(Loader):
-    def load(self, data: bytes) -> Decimal:
-        return Decimal(data.decode("utf8"))
+    def load(self, data: bytes) -> Union[int, Decimal]:
+        if b"." in data or data == b"NaN":
+            return Decimal(data.decode("utf8"))
+        else:
+            return int(data)

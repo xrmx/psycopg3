@@ -130,6 +130,25 @@ def test_load_int(conn, val, pgtype, want, fmt_out):
     assert type(result[0]) is type(want)
 
 
+@pytest.mark.parametrize(
+    "val",
+    [
+        "0",
+        "100",
+        "-1000000000000000000000000000",
+        "1e+80",
+        "-1e+80",
+    ],
+)
+def test_roundtrip_int(conn, val):
+    cur = conn.cursor()
+    val = int(Decimal(val))
+    cur.execute("select %s", (val,))
+    result = cur.fetchone()[0]
+    assert isinstance(result, int)
+    assert result == val
+
+
 #
 # Tests with float
 #
@@ -293,7 +312,6 @@ def test_load_float_approx(conn, expr, pgtype, want, fmt_out):
 @pytest.mark.parametrize(
     "val",
     [
-        "0",
         "0.0",
         "0.000000000000000000001",
         "-0.000000000000000000001",
