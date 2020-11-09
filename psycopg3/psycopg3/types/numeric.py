@@ -5,11 +5,12 @@ Adapers for numeric types.
 # Copyright (C) 2020 The Psycopg Team
 
 import struct
-from typing import Any, Callable, Dict, Tuple, Union, cast
+from typing import Any, Callable, Dict, Optional, Tuple, Union, cast
 from decimal import Decimal
 
 from ..oids import builtins
 from ..adapt import Dumper, Loader
+from ..proto import AdaptContext
 
 _PackInt = Callable[[int], bytes]
 _UnpackInt = Callable[[bytes], Tuple[int]]
@@ -199,8 +200,32 @@ class Float8BinaryLoader(Loader):
 
 @Loader.text(builtins["numeric"].oid)
 class NumericLoader(Loader):
+    def __init__(self, oid: int, fmod: int = -1, context: AdaptContext = None):
+        super().__init__(oid, fmod, context)
+
+        # If the scale is available as column modifier use a faster parser
+        scale = self._scale_from_fmod(fmod)
+        if scale is not None:
+            self.load = (  # type: ignore[assignment]
+                self._load_as_decimal if scale else self._load_as_int
+            )
+
     def load(self, data: bytes) -> Union[int, Decimal]:
+        # generic version: look for a . to decide the type to return
         if b"." in data or data == b"NaN":
             return Decimal(data.decode("utf8"))
         else:
             return int(data)
+
+    def _load_as_decimal(self, data: bytes) -> Union[int, Decimal]:
+        return Decimal(data.decode("utf8"))
+
+    def _load_as_int(self, data: bytes) -> Union[int, Decimal]:
+        return int(data) if data != b"NaN" else Decimal("NaN")
+
+    def _scale_from_fmod(self, fmod: int) -> Optional[int]:
+        fmod -= 4
+        if fmod >= 0:
+            return fmod & 0xFFFF
+        else:
+            return None

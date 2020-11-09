@@ -426,3 +426,47 @@ def test_minus_minus_quote(conn, pgtype):
     cur.execute(sql.SQL("select -{}{}").format(sql.Literal(-1), sql.SQL(cast)))
     result = cur.fetchone()[0]
     assert result == 1
+
+
+@pytest.mark.parametrize(
+    "val",
+    [
+        "0",
+        "100",
+        "-1000000000000000000000000000",
+        "1e+80",
+        "-1e+80",
+    ],
+)
+def test_specialised_load(conn, val):
+    # This test tests an implementation detail:
+    # should it change it is expected to break.
+    if psycopg3.pq.__impl__ != "ctypes":
+        pytest.skip("testing a ctypes implementation detail")
+
+    cur = conn.cursor()
+    val = int(Decimal(val))
+
+    cur.execute("select %s", (val,))
+    result = cur.fetchone()[0]
+    assert isinstance(result, int)
+    assert result == val
+
+    loader = next(iter(cur._transformer._loaders_cache.values()))
+    assert loader.load.__name__ == "load"
+
+    cur.execute(f"select %s::numeric({len(str(val))})", (val,))
+    result = cur.fetchone()[0]
+    assert isinstance(result, int)
+    assert result == val
+
+    loader = next(iter(cur._transformer._loaders_cache.values()))
+    assert loader.load.__name__ == "_load_as_int"
+
+    cur.execute(f"select %s::numeric({len(str(val)) + 1}, 1)", (val,))
+    result = cur.fetchone()[0]
+    assert isinstance(result, Decimal)
+    assert result == val
+
+    loader = next(iter(cur._transformer._loaders_cache.values()))
+    assert loader.load.__name__ == "_load_as_decimal"
