@@ -31,7 +31,7 @@ from .pq import ConnStatus, ExecStatus, TransactionStatus, Format
 from .sql import Composable
 from .proto import PQGen, PQGenConn, RV, Query, Params, AdaptContext
 from .proto import ConnectionType
-from .conninfo import make_conninfo
+from .conninfo import make_conninfo, ConnectionInfo
 from .generators import notifies
 from .transaction import Transaction, AsyncTransaction
 from ._preparing import PrepareManager
@@ -198,6 +198,10 @@ class BaseConnection(AdaptContext):
         (result,) = yield from execute(self.pgconn)
         if result.status != ExecStatus.TUPLES_OK:
             raise e.error_from_result(result, encoding=self.client_encoding)
+
+    @property
+    def info(self) -> ConnectionInfo:
+        return ConnectionInfo(self.pgconn)
 
     @property
     def adapters(self) -> adapt.AdaptersMap:
