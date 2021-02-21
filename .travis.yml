@@ -4,7 +4,7 @@ language: python
 
 env:
   global:
-    - PSYCOPG3_TEST_DSN=dbname=psycopg3_test
+    - PSYCOPG3_TEST_DSN="dbname=psycopg3_test host=localhost user=travis password=travis"
 
 matrix:
   include:
@@ -115,7 +115,9 @@ matrix:
 
 install:
   - pip install tox
-  - test ${TOXENV:0:2} != py || psql -c 'create database psycopg3_test'
+  - test ${TOXENV:0:2} != py || psql -c "create database psycopg3_test"
+  # allow connecting on host=localhost, required by proxy tests
+  - test ${TOXENV:0:2} != py || psql -c "alter user travis with password 'travis'"
 
 script:
   - tox -c $TOXDIR
